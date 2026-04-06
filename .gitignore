@@ -1,2 +1,38 @@
+# Python
 .venv
+venv/
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment
+.env
+.env.local
+
+# Database
+database/*.db
+database/*.db-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Camera calibration data (optional - can be committed if needed)
+camera/calibration_data/*.json
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
