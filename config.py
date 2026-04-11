@@ -25,9 +25,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["*"]
 
     # Camera Configuration
-    camera_0_id: int = 0
-    camera_1_id: int = 1
-    camera_2_id: int = 2
+    # Accepts a device index ("0", "1", "2") for USB/built-in cameras,
+    # or an HTTP MJPEG URL (e.g. "http://192.168.1.100:8080/video") for IP cameras.
+    camera_0_source: str = "0"
+    camera_1_source: str = "1"
+    camera_2_source: str = "2"
     camera_fps: int = 30
     stability_frames: int = 45  # 30fps × 1.5s
     position_tolerance_px: int = 5
@@ -38,6 +40,16 @@ class Settings(BaseSettings):
 
     # Database Configuration
     database_url: str = "sqlite+aiosqlite:///./database/darts.db"
+
+    # Board calibration — fractions of frame dimensions (0.0–1.0).
+    # Used by CoordinateMapper for mobile-camera dart detection.
+    board_center_x_pct: float = 0.5
+    board_center_y_pct: float = 0.5
+    board_radius_pct: float = 0.4
+
+    # Mobile camera frame rate.
+    # Stability threshold = max(5, int(1.5 × mobile_camera_fps)) frames.
+    mobile_camera_fps: int = 10
 
 
 # Global settings instance

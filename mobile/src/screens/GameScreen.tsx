@@ -9,10 +9,12 @@ import {
 } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { COLORS, SPACING, TYPOGRAPHY } from '../constants/theme';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useGame } from '../hooks/useGame';
 import { useGameStore } from '../store/gameStore';
+import { useCameraStream } from '../hooks/useCameraStream';
 import PlayerCard from '../components/PlayerCard';
 import ThrowSlots from '../components/ThrowSlots';
 import BustOverlay from '../components/BustOverlay';
@@ -30,6 +32,21 @@ export default function GameScreen() {
   const { gameState, lastThrow, isBust, bustData } = useGameStore();
   const { undoLastThrow, getCurrentPlayer, submitManualScore } = useGame();
   const [manualScoreVisible, setManualScoreVisible] = useState(false);
+
+  const [permission, requestPermission] = useCameraPermissions();
+  const { isStreaming, startStreaming, stopStreaming, cameraRef } = useCameraStream();
+
+  const handleCameraToggle = async () => {
+    if (isStreaming) {
+      stopStreaming();
+      return;
+    }
+    if (!permission?.granted) {
+      const result = await requestPermission();
+      if (!result.granted) return;
+    }
+    startStreaming();
+  };
 
   const currentPlayer = getCurrentPlayer();
 
@@ -86,6 +103,18 @@ export default function GameScreen() {
         )}
       </ScrollView>
 
+      {/* Camera preview — rendered outside ScrollView for Android surface stability */}
+      {isStreaming && permission?.granted && (
+        <View style={styles.cameraContainer}>
+          <CameraView
+            ref={cameraRef}
+            style={styles.cameraPreview}
+            facing="back"
+          />
+          <Text style={styles.cameraHint}>Kamera aktív – tartsd a táblára</Text>
+        </View>
+      )}
+
       {/* Action buttons */}
       <View style={styles.actionBar}>
         <TouchableOpacity style={styles.actionButton} onPress={handleUndo}>
@@ -96,6 +125,12 @@ export default function GameScreen() {
           onPress={() => setManualScoreVisible(true)}
         >
           <Text style={styles.actionButtonText}>Kézi pont</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, isStreaming && styles.actionButtonActive]}
+          onPress={handleCameraToggle}
+        >
+          <Text style={styles.actionButtonText}>{isStreaming ? 'Kamera ki' : 'Kamera'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -173,9 +208,34 @@ const styles = StyleSheet.create({
   actionButtonPrimary: {
     backgroundColor: COLORS.primary,
   },
+  actionButtonActive: {
+    backgroundColor: COLORS.error,
+  },
   actionButtonText: {
     fontSize: TYPOGRAPHY.body,
     fontWeight: 'bold',
     color: COLORS.text,
+  },
+  cameraContainer: {
+    height: 200,
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  cameraPreview: {
+    flex: 1,
+  },
+  cameraHint: {
+    position: 'absolute',
+    bottom: SPACING.sm,
+    alignSelf: 'center',
+    color: COLORS.text,
+    fontSize: TYPOGRAPHY.small,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
 });

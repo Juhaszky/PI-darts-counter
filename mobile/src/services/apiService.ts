@@ -7,7 +7,7 @@ import type {
   HealthResponse,
   ThrowResponse,
 } from '../types/api.types';
-import type { GameState, ThrowData } from '../types/game.types';
+import type { GameState, Player, ThrowData } from '../types/game.types';
 
 class ApiService {
   private client: AxiosInstance | null = null;
@@ -60,6 +60,12 @@ class ApiService {
   async getHealth(): Promise<HealthResponse> {
     if (!this.client) throw new Error('API not initialized');
     const response = await this.client.get<HealthResponse>('/api/health');
+    return response.data;
+  }
+
+  async getPlayers() : Promise<Player[]> {
+    if (!this.client) throw new Error('API not initialized');
+    const response = await this.client.get<Player[]>(`/api/players`);
     return response.data;
   }
 

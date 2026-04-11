@@ -49,3 +49,15 @@ export interface CameraStatus {
   label: string;
   active: boolean;
 }
+
+// ---- Outgoing (client → server) message types ----
+
+export type WsOutgoingEventType =
+  | 'manual_score'
+  | 'undo_throw'
+  | 'next_turn'
+  | 'camera_frame';
+
+export interface WsCameraFramePayload {
+  frame: string; // base64-encoded JPEG
+}

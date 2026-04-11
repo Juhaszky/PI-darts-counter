@@ -33,6 +33,7 @@ class GameManager:
         self.players: dict[str, list[Player]] = {}  # game_id -> list of players
         self.throws_history: dict[str, list[ThrowResult]] = {}  # game_id -> list of throws
         self.turn_throws: dict[str, list[ThrowResult]] = {}  # game_id -> current turn throws
+        self.last_turn_throws: dict[str, list[ThrowResult]] = {}  # game_id -> last completed turn throws
 
     @classmethod
     def get_instance(cls) -> "GameManager":
@@ -86,6 +87,7 @@ class GameManager:
         self.players[game_id] = players
         self.throws_history[game_id] = []
         self.turn_throws[game_id] = []
+        self.last_turn_throws[game_id] = []
 
         return game, players
 
@@ -159,9 +161,6 @@ class GameManager:
         # Calculate throw result
         throw_number = current_player.throws_this_turn + 1
         throws_left = 3 - throw_number
-
-        if throw_number == 3:
-          self._next_player(game_id)
 
         throw_result = calculate_throw(
             segment=segment,
@@ -272,7 +271,8 @@ class GameManager:
         if game.current_player_idx == 0:
             game.round += 1
 
-        # Clear turn throws
+        # Save completed turn throws before clearing (used by websocket broadcast)
+        self.last_turn_throws[game_id] = list(self.turn_throws[game_id])
         self.turn_throws[game_id] = []
 
     def _end_game(self, game_id: str, winner_id: str) -> None:
@@ -324,6 +324,7 @@ class GameManager:
         # Clear history
         self.throws_history[game_id] = []
         self.turn_throws[game_id] = []
+        self.last_turn_throws[game_id] = []
 
         return True
 
@@ -344,5 +345,6 @@ class GameManager:
         del self.players[game_id]
         del self.throws_history[game_id]
         del self.turn_throws[game_id]
+        del self.last_turn_throws[game_id]
 
         return True

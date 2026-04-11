@@ -8,6 +8,7 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -18,6 +19,7 @@ import { useGame } from '../hooks/useGame';
 import { wsService } from '../services/websocketService';
 import type { RootStackParamList } from '../navigation/types';
 import type { GameMode } from '../types/game.types';
+import PlayerModal from '../components/PlayersModal';
 
 type SetupScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Setup'>;
 
@@ -31,12 +33,18 @@ export default function SetupScreen() {
   const [players, setPlayers] = useState<string[]>(['', '']);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false); 
 
   const handleAddPlayer = () => {
     if (newPlayerName.trim()) {
       setPlayers([...players, newPlayerName.trim()]);
       setNewPlayerName('');
     }
+  };
+
+  const handleConfirmPlayers = (newPlayers: string[]) => {
+    setPlayers(newPlayers);
+    setIsModalOpen(false);
   };
 
   const handleRemovePlayer = (index: number) => {
@@ -110,7 +118,7 @@ export default function SetupScreen() {
       </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>Játékosok</Text>
-      {players.map((player, index) => (
+      {/* {players.map((player, index) => (
         <View key={index} style={styles.playerRow}>
           <TextInput
             style={styles.playerInput}
@@ -132,7 +140,7 @@ export default function SetupScreen() {
             </TouchableOpacity>
           )}
         </View>
-      ))}
+      ))} */}
 
       <View style={styles.addPlayerRow}>
         <TextInput
@@ -143,7 +151,9 @@ export default function SetupScreen() {
           placeholderTextColor={COLORS.textSecondary}
           onSubmitEditing={handleAddPlayer}
         />
-        <TouchableOpacity style={styles.addButton} onPress={handleAddPlayer}>
+        <TouchableOpacity style={styles.addButton} onPress={() => {
+          setIsModalOpen(true);
+        }}>
           <Text style={styles.addButtonText}>+ Hozzáad</Text>
         </TouchableOpacity>
       </View>
@@ -159,6 +169,18 @@ export default function SetupScreen() {
           <Text style={styles.startButtonText}>Játék indítása</Text>
         )}
       </TouchableOpacity>
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={isModalOpen}
+        onRequestClose={() => setIsModalOpen(false)}
+      >
+        <PlayerModal
+          onClose={() => setIsModalOpen(false)}
+          onConfirm={handleConfirmPlayers}
+          onAddInline={handleAddPlayer}
+        />
+      </Modal>
     </ScrollView>
   );
 }

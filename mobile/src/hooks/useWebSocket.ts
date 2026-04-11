@@ -8,7 +8,7 @@ import type { WsEvent } from '../types/websocket.types';
 
 export function useWebSocket() {
   const navigation = useNavigation();
-  const { setGameState, updateThrow, setBust, clearBust, setGameOver } = useGameStore();
+  const { setGameState, updateThrow, setBust, clearBust, setGameOver, setCurrentPlayer } = useGameStore();
   const { setStatus } = useConnectionStore();
 
   const handleMessage = useCallback((event: WsEvent) => {
@@ -27,13 +27,18 @@ export function useWebSocket() {
       case 'bust':
         setBust(event.data);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        // Auto-clear bust after 3 seconds
-        setTimeout(() => clearBust(), 3000);
+        setTimeout(() => {
+          clearBust();
+          if (event.data?.nextPlayerId) {
+            setCurrentPlayer(event.data.nextPlayerId);
+          }
+        }, 3000);
         break;
 
       case 'turn_complete':
-        // Optional: Navigate or update UI
-        console.log('[Hook] Turn complete:', event.data);
+        if (event.data?.nextPlayerId) {
+          setCurrentPlayer(event.data.nextPlayerId);
+        }
         break;
 
       case 'game_over':
@@ -50,7 +55,7 @@ export function useWebSocket() {
       default:
         console.warn('[Hook] Unknown event type:', event.type);
     }
-  }, [setGameState, updateThrow, setBust, clearBust, setGameOver, navigation]);
+  }, [setGameState, updateThrow, setBust, clearBust, setGameOver, setCurrentPlayer, navigation]);
 
   useEffect(() => {
     const unsubscribeMessages = wsService.onMessage(handleMessage);
