@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { COLORS } from '../constants/theme';
+import { useTheme } from '../themes/ThemeContext';
 import HomeScreen from '../screens/HomeScreen';
 import SetupScreen from '../screens/SetupScreen';
 import GameScreen from '../screens/GameScreen';
@@ -11,31 +11,38 @@ import type { RootStackParamList } from './types';
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
+  const { colors, typography } = useTheme();
+
   return (
     <NavigationContainer>
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
-            backgroundColor: COLORS.card,
+            backgroundColor: colors.card,
+            shadowColor: colors.border,
+            shadowOpacity: 1,
+            elevation: 1,
           },
-          headerTintColor: COLORS.text,
+          headerTintColor: colors.text,
           headerTitleStyle: {
             fontWeight: 'bold',
+            fontSize: typography.body,
+            color: colors.text,
           },
           cardStyle: {
-            backgroundColor: COLORS.background,
+            backgroundColor: colors.background,
           },
         }}
       >
         <Stack.Screen
           name="Home"
           component={HomeScreen}
-          options={{ title: '🎯 Darts Counter' }}
+          options={{ headerShown: false }}
         />
         <Stack.Screen
           name="Setup"
           component={SetupScreen}
-          options={{ title: 'Új Játék' }}
+          options={{ title: 'New Game' }}
         />
         <Stack.Screen
           name="Game"
@@ -45,7 +52,7 @@ export default function AppNavigator() {
         <Stack.Screen
           name="Stats"
           component={StatsScreen}
-          options={{ title: 'Statisztikák' }}
+          options={{ title: 'Match Stats' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

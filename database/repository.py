@@ -16,12 +16,16 @@ Design decisions:
   large history sets.
 - Raw SQL strings are never used.  All queries go through the SQLAlchemy ORM
   or core expression language to ensure parameterisation.
+- NO function in this module ever calls db.commit().  The caller (or get_db())
+  is always responsible for committing or rolling back the session.
+- db.flush() is used only where we need the DB to assign/return a generated
+  value within the same transaction (e.g. after db.add() in create_player).
 """
 import logging
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import GameRecord, PlayerRecord, ThrowRecord
@@ -31,6 +35,10 @@ from models.throw import ThrowResult
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Game persistence
+# ---------------------------------------------------------------------------
 
 async def save_game(db: AsyncSession, game: Game, players: list[Player]) -> None:
     """
@@ -53,7 +61,7 @@ async def save_game(db: AsyncSession, game: Game, players: list[Player]) -> None
         created_at=game.created_at,
         finished_at=game.finished_at,
     )
-    # merge() issues an INSERT or UPDATE based on whether the PK already exists
+    # merge() issues an INSERT or UPDATE based on whether the PK already exists.
     await db.merge(game_record)
 
     for player in players:
@@ -66,9 +74,196 @@ async def save_game(db: AsyncSession, game: Game, players: list[Player]) -> None
         )
         await db.merge(player_record)
 
-    # The caller (or get_db()) is responsible for committing the session.
     logger.debug("Saved game %s with %d players to database.", game.id, len(players))
 
+
+async def finish_game(
+    db: AsyncSession,
+    game_id: str,
+    winner_id: str,
+    finished_at: datetime,
+) -> None:
+    """
+    Mark a game as finished by updating its status, winner, and finish time.
+
+    Issues a single UPDATE statement rather than loading the object first.
+
+    Args:
+        db:          Active async database session.
+        game_id:     UUID string of the game to finish.
+        winner_id:   UUID string of the winning player.
+        finished_at: UTC datetime when the game ended.
+    """
+    stmt = (
+        update(GameRecord)
+        .where(GameRecord.id == game_id)
+        .values(
+            status="finished",
+            winner_id=winner_id,
+            finished_at=finished_at,
+        )
+    )
+    await db.execute(stmt)
+    logger.info("Game %s finished. Winner: %s.", game_id, winner_id)
+
+
+async def get_game_by_id(db: AsyncSession, game_id: str) -> GameRecord | None:
+    """
+    Fetch a single game record by primary key.
+
+    Args:
+        db:      Active async database session.
+        game_id: UUID string of the game to retrieve.
+
+    Returns:
+        The GameRecord if found, None otherwise.
+    """
+    stmt = select(GameRecord).where(GameRecord.id == game_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def update_game_status(db: AsyncSession, game_id: str, status: str) -> None:
+    """
+    Update the status field of an existing game record.
+
+    Args:
+        db:      Active async database session.
+        game_id: UUID string of the game to update.
+        status:  New status value ("waiting" | "in_progress" | "finished").
+    """
+    stmt = (
+        update(GameRecord)
+        .where(GameRecord.id == game_id)
+        .values(status=status)
+    )
+    await db.execute(stmt)
+    logger.debug("Updated game %s status to '%s'.", game_id, status)
+
+
+async def delete_game(db: AsyncSession, game_id: str) -> None:
+    """
+    Delete a game record and all associated players and throws.
+
+    Cascade deletes on the FK relationships handle players and throws
+    automatically, so a single DELETE on games is sufficient.
+
+    Args:
+        db:      Active async database session.
+        game_id: UUID string of the game to delete.
+    """
+    stmt = delete(GameRecord).where(GameRecord.id == game_id)
+    await db.execute(stmt)
+    logger.info("Deleted game %s (cascade removes players and throws).", game_id)
+
+
+# ---------------------------------------------------------------------------
+# Player persistence
+# ---------------------------------------------------------------------------
+
+async def get_players_by_game_id(
+    db: AsyncSession, game_id: str
+) -> list[PlayerRecord]:
+    """
+    Return all players for a game ordered by their turn position.
+
+    Args:
+        db:      Active async database session.
+        game_id: UUID string of the parent game.
+
+    Returns:
+        List of PlayerRecord objects ordered by order_idx ascending.
+    """
+    stmt = (
+        select(PlayerRecord)
+        .where(PlayerRecord.game_id == game_id)
+        .order_by(PlayerRecord.order_idx.asc())
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def update_player_score(
+    db: AsyncSession, player_id: str, score: int
+) -> None:
+    """
+    Update the persisted score for a single player.
+
+    Args:
+        db:        Active async database session.
+        player_id: UUID string of the player to update.
+        score:     New score value to write.
+    """
+    stmt = (
+        update(PlayerRecord)
+        .where(PlayerRecord.id == player_id)
+        .values(score=score)
+    )
+    await db.execute(stmt)
+    logger.debug("Updated player %s score to %d.", player_id, score)
+
+
+async def reset_players_score(
+    db: AsyncSession, game_id: str, starting_score: int
+) -> None:
+    """
+    Reset every player in a game back to the starting score.
+
+    Used by the reset_game operation to restore all player scores in a single
+    UPDATE rather than one statement per player.
+
+    Args:
+        db:            Active async database session.
+        game_id:       UUID string of the game whose players should be reset.
+        starting_score: The mode's starting score (301 or 501).
+    """
+    stmt = (
+        update(PlayerRecord)
+        .where(PlayerRecord.game_id == game_id)
+        .values(score=starting_score)
+    )
+    await db.execute(stmt)
+    logger.debug(
+        "Reset all players in game %s to score %d.", game_id, starting_score
+    )
+
+
+async def create_player(db: AsyncSession, name: str) -> PlayerRecord:
+    """
+    Insert a new, unassigned player row and return the persisted record.
+
+    The player starts with no game association (game_id=None), score 0, and
+    order_idx 0.  The caller is responsible for assigning game_id and
+    order_idx before or after committing, as needed.
+
+    Uses db.flush() — not db.commit() — so the insert becomes visible within
+    the current transaction without ending it.  The caller controls the commit.
+
+    Args:
+        db:   Active async database session.
+        name: Display name for the player (will be stripped of whitespace).
+
+    Returns:
+        Fully refreshed PlayerRecord with its generated id populated.
+    """
+    player = PlayerRecord(
+        id=str(uuid.uuid4()),
+        game_id=None,
+        name=name.strip(),
+        score=0,
+        order_idx=0,
+    )
+    db.add(player)
+    # flush() sends the INSERT to the DB within this transaction so that
+    # db.refresh() can read the written state back without committing.
+    await db.flush()
+    await db.refresh(player)
+    return player
+
+
+# ---------------------------------------------------------------------------
+# Throw persistence
+# ---------------------------------------------------------------------------
 
 async def save_throw(
     db: AsyncSession,
@@ -80,9 +275,10 @@ async def save_throw(
     """
     Persist a single throw result to the database.
 
-    A stable UUID is generated from the combination of player_id, round, and
-    throw_num so that replaying the same throw (e.g. after a crash) produces
-    the same PK and merge() becomes a no-op rather than a duplicate insert.
+    A stable UUID is generated from the combination of game_id, player_id,
+    round, and throw_num so that replaying the same throw (e.g. after a crash)
+    produces the same PK and merge() becomes a no-op rather than a duplicate
+    insert.
 
     Args:
         db:        Active async database session.
@@ -91,7 +287,7 @@ async def save_throw(
         round_num: Current round number (1-indexed).
         throw_num: Throw number within the current turn (1-3).
     """
-    # Deterministic UUID: same throw always maps to the same DB row.
+    # Deterministic UUID: the same logical throw always maps to the same DB row.
     throw_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_OID,
@@ -125,35 +321,62 @@ async def save_throw(
     )
 
 
-async def finish_game(
-    db: AsyncSession,
-    game_id: str,
-    winner_id: str,
-    finished_at: datetime,
-) -> None:
+async def delete_latest_throw(db: AsyncSession, game_id: str) -> bool:
     """
-    Mark a game as finished by updating its status, winner, and finish time.
+    Delete the most recently recorded throw for a game (undo support).
 
-    Issues a single UPDATE statement rather than loading the object first.
+    Uses a two-step SELECT-then-DELETE by PK rather than a single
+    DELETE ... ORDER BY ... LIMIT because SQLite's support for that syntax
+    through the SQLAlchemy ORM is not guaranteed across driver versions.
 
     Args:
-        db:          Active async database session.
-        game_id:     UUID string of the game to finish.
-        winner_id:   UUID string of the winning player.
-        finished_at: UTC datetime when the game ended.
-    """
-    stmt = (
-        update(GameRecord)
-        .where(GameRecord.id == game_id)
-        .values(
-            status="finished",
-            winner_id=winner_id,
-            finished_at=finished_at,
-        )
-    )
-    await db.execute(stmt)
-    logger.info("Game %s finished. Winner: %s.", game_id, winner_id)
+        db:      Active async database session.
+        game_id: UUID string of the game whose latest throw should be removed.
 
+    Returns:
+        True if a throw was found and deleted, False if no throws exist.
+    """
+    # Step 1: find the PK of the most recent throw for this game.
+    select_stmt = (
+        select(ThrowRecord.id)
+        .where(ThrowRecord.game_id == game_id)
+        .order_by(ThrowRecord.timestamp.desc())
+        .limit(1)
+    )
+    result = await db.execute(select_stmt)
+    throw_id: str | None = result.scalar_one_or_none()
+
+    if throw_id is None:
+        logger.debug("delete_latest_throw: no throws found for game %s.", game_id)
+        return False
+
+    # Step 2: delete by PK — avoids any ambiguity if two throws share a
+    # millisecond-precision timestamp.
+    delete_stmt = delete(ThrowRecord).where(ThrowRecord.id == throw_id)
+    await db.execute(delete_stmt)
+    logger.debug("Deleted latest throw %s from game %s.", throw_id, game_id)
+    return True
+
+
+async def clear_game_throws(db: AsyncSession, game_id: str) -> None:
+    """
+    Delete every throw record that belongs to a game.
+
+    Used by reset_game to wipe the throw history while keeping the game and
+    player rows intact.
+
+    Args:
+        db:      Active async database session.
+        game_id: UUID string of the game whose throws should be cleared.
+    """
+    stmt = delete(ThrowRecord).where(ThrowRecord.game_id == game_id)
+    await db.execute(stmt)
+    logger.debug("Cleared all throws for game %s.", game_id)
+
+
+# ---------------------------------------------------------------------------
+# Analytics / history queries
+# ---------------------------------------------------------------------------
 
 async def get_game_history(db: AsyncSession, limit: int = 10) -> list[dict]:
     """
@@ -257,7 +480,9 @@ async def get_player_stats(db: AsyncSession, player_name: str) -> dict:
     games_played: int = games_row.games_played or 0
     wins: int = wins_row.wins or 0
 
-    avg_per_dart: float = round(total_score / total_throws, 2) if total_throws > 0 else 0.0
+    avg_per_dart: float = (
+        round(total_score / total_throws, 2) if total_throws > 0 else 0.0
+    )
 
     return {
         "player_name": player_name,
@@ -268,7 +493,20 @@ async def get_player_stats(db: AsyncSession, player_name: str) -> dict:
         "avg_per_dart": avg_per_dart,
         "busts": busts,
     }
+
+
 async def get_all_player_names(db: AsyncSession) -> list[str]:
+    """
+    Return a sorted, deduplicated list of every player name ever recorded.
+
+    Useful for autocomplete on the player-creation screen.
+
+    Args:
+        db: Active async database session.
+
+    Returns:
+        List of unique player name strings, ordered alphabetically.
+    """
     stmt = (
         select(distinct(PlayerRecord.name))
         .where(PlayerRecord.name.is_not(None))
@@ -276,16 +514,3 @@ async def get_all_player_names(db: AsyncSession) -> list[str]:
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())
-
-async def create_player(db: AsyncSession, name: str) -> PlayerRecord:
-    player = PlayerRecord(
-        id=str(uuid.uuid4()),
-        game_id=None,   # only if this column is nullable; otherwise use a separate table
-        name=name.strip(),
-        score=0,
-        order_idx=0,
-    )
-    db.add(player)
-    await db.commit()
-    await db.refresh(player)
-    return player

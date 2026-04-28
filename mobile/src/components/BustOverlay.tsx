@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import { COLORS, TYPOGRAPHY } from '../constants/theme';
+import { useTheme } from '../themes/ThemeContext';
+import type { Theme } from '../themes';
 
 interface BustOverlayProps {
   visible: boolean;
@@ -8,6 +9,7 @@ interface BustOverlayProps {
 }
 
 export default function BustOverlay({ visible, playerName }: BustOverlayProps) {
+  const { colors, typography } = useTheme();
   const opacity = React.useRef(new Animated.Value(0)).current;
   const scale = React.useRef(new Animated.Value(0.5)).current;
 
@@ -38,9 +40,11 @@ export default function BustOverlay({ visible, playerName }: BustOverlayProps) {
         }),
       ]).start();
     }
-  }, [visible]);
+  }, [visible, opacity, scale]);
 
   if (!visible) return null;
+
+  const styles = createStyles(colors, typography);
 
   return (
     <View style={styles.container}>
@@ -52,28 +56,36 @@ export default function BustOverlay({ visible, playerName }: BustOverlayProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  content: {
-    backgroundColor: COLORS.error,
-    borderRadius: 20,
-    padding: 40,
-    alignItems: 'center',
-  },
-  bustText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  playerText: {
-    fontSize: TYPOGRAPHY.h3,
-    color: COLORS.text,
-  },
-});
+function createStyles(
+  colors: Theme['colors'],
+  typography: Theme['typography'],
+) {
+  return StyleSheet.create({
+    container: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1000,
+    },
+    content: {
+      backgroundColor: colors.bust,
+      borderRadius: 24,
+      paddingVertical: 40,
+      paddingHorizontal: 56,
+      alignItems: 'center',
+    },
+    bustText: {
+      fontSize: 52,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      marginBottom: 8,
+      letterSpacing: 2,
+    },
+    playerText: {
+      fontSize: typography.h3,
+      color: 'rgba(255,255,255,0.85)',
+      fontWeight: '600',
+    },
+  });
+}

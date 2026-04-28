@@ -63,10 +63,10 @@ class ApiService {
     return response.data;
   }
 
-  async getPlayers() : Promise<Player[]> {
+  async getPlayers(): Promise<string[]> {
     if (!this.client) throw new Error('API not initialized');
-    const response = await this.client.get<Player[]>(`/api/players`);
-    return response.data;
+    const response = await this.client.get<{ players: string[] }>('/api/players');
+    return response.data.players;
   }
 
   getBaseURL(): string {

@@ -1,67 +1,78 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { ConnectionStatus } from '../services/websocketService';
-import { COLORS, SPACING, TYPOGRAPHY } from '../constants/theme';
+import { useTheme } from '../themes/ThemeContext';
+import type { Theme } from '../themes';
 
 interface ConnectionStatusProps {
   status: ConnectionStatus;
 }
 
 export default function ConnectionStatusIndicator({ status }: ConnectionStatusProps) {
-  const getStatusColor = () => {
+  const { colors, spacing, typography } = useTheme();
+
+  const getStatusColor = (): string => {
     switch (status) {
       case ConnectionStatus.CONNECTED:
-        return COLORS.success;
+        return colors.success;
       case ConnectionStatus.CONNECTING:
       case ConnectionStatus.RECONNECTING:
-        return COLORS.warning;
+        return colors.warning;
       case ConnectionStatus.DISCONNECTED:
       case ConnectionStatus.ERROR:
-        return COLORS.error;
+        return colors.error;
       default:
-        return COLORS.textSecondary;
+        return colors.placeholder;
     }
   };
 
-  const getStatusText = () => {
+  const getStatusText = (): string => {
     switch (status) {
       case ConnectionStatus.CONNECTED:
-        return 'Csatlakozva';
+        return 'Connected';
       case ConnectionStatus.CONNECTING:
-        return 'Csatlakozás...';
+        return 'Connecting...';
       case ConnectionStatus.RECONNECTING:
-        return 'Újracsatlakozás...';
+        return 'Reconnecting...';
       case ConnectionStatus.DISCONNECTED:
-        return 'Nincs kapcsolat';
+        return 'Disconnected';
       case ConnectionStatus.ERROR:
-        return 'Hiba';
+        return 'Connection error';
       default:
-        return 'Ismeretlen';
+        return 'Unknown';
     }
   };
+
+  const styles = createStyles(colors, spacing, typography);
+  const statusColor = getStatusColor();
 
   return (
     <View style={styles.container}>
-      <View style={[styles.indicator, { backgroundColor: getStatusColor() }]} />
-      <Text style={styles.text}>{getStatusText()}</Text>
+      <View style={[styles.indicator, { backgroundColor: statusColor }]} />
+      <Text style={[styles.text, { color: statusColor }]}>{getStatusText()}</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: SPACING.sm,
-  },
-  indicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: SPACING.sm,
-  },
-  text: {
-    fontSize: TYPOGRAPHY.small,
-    color: COLORS.text,
-  },
-});
+function createStyles(
+  colors: Theme['colors'],
+  spacing: Theme['spacing'],
+  typography: Theme['typography'],
+) {
+  return StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    indicator: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: spacing.sm,
+    },
+    text: {
+      fontSize: typography.small,
+      fontWeight: '600',
+    },
+  });
+}

@@ -1,8 +1,19 @@
 """
 REST API routes for PI Darts Counter.
-Handles game lifecycle, player management, and manual throw input.
+
+This module is a thin controller layer. It is responsible exclusively for:
+  - Parsing and validating HTTP requests (handled by FastAPI + Pydantic).
+  - Delegating ALL business operations to the appropriate service.
+  - Shaping HTTP responses and selecting appropriate status codes.
+
+No game logic, score calculation, or direct database queries belong here.
+Camera endpoints are exempt: they read hardware state directly and have no
+business-logic equivalent in any service.
+
+Services follow the Interface Segregation Principle — each route declares only
+the service(s) it actually uses.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
@@ -14,21 +25,27 @@ from models import (
     PlayerResponse,
     ThrowCreate,
 )
-from game import GameManager
-from services.game_service import GameService
+from services import (
+    GameQueryService,
+    GameLifecycleService,
+    ThrowService,
+    PlayerService,
+    AnalyticsService,
+    get_query_service,
+    get_lifecycle_service,
+    get_throw_service,
+    get_player_service,
+    get_analytics_service,
+)
 from database.db import get_db
 from api.websocket import _coordinate_mapper
 
 router = APIRouter(prefix="/api", tags=["games"])
 
 
-def get_game_manager() -> GameManager:
-    """Dependency to get GameManager singleton."""
-    return GameManager.get_instance()
-
-def get_game_service() -> GameService:
-    manager = get_game_manager()
-    return GameService(manager)  # inject GameService as a dependency
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 @router.get("/health")
 async def health_check():
@@ -40,20 +57,26 @@ async def health_check():
     }
 
 
+# ---------------------------------------------------------------------------
+# Game lifecycle
+# ---------------------------------------------------------------------------
+
 @router.post("/games", response_model=GameCreateResponse, status_code=status.HTTP_201_CREATED)
-async def create_game(game_data: GameCreate):
+async def create_game(
+    game_data: GameCreate,
+    db: AsyncSession = Depends(get_db),
+    lifecycle: GameLifecycleService = Depends(get_lifecycle_service),
+):
     """
     Create a new game with players.
 
     Args:
-        game_data: Game creation data with mode, double_out, and players
+        game_data: Game creation data with mode, double_out, and players.
 
     Returns:
-        Game creation response with game_id
+        Game creation response with game_id.
     """
-    manager = get_game_manager()
-    game, players = manager.create_game(game_data)
-
+    game, _players = await lifecycle.create_game(db, game_data)
     return GameCreateResponse(
         game_id=game.id,
         mode=game.mode,
@@ -63,27 +86,30 @@ async def create_game(game_data: GameCreate):
 
 
 @router.get("/games/{game_id}", response_model=GameResponse)
-async def get_game(game_id: str):
+async def get_game(
+    game_id: str,
+    query: GameQueryService = Depends(get_query_service),
+):
     """
     Get game state by ID.
 
+    Read-only — no database session needed; all state is in memory.
+
     Args:
-        game_id: Game UUID
+        game_id: Game UUID.
 
     Returns:
-        Complete game state
+        Complete game state including all players and current turn info.
     """
-    manager = get_game_manager()
-    game = manager.get_game(game_id)
-
-    if not game:
+    game = query.get_game(game_id)
+    if game is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Game {game_id} not found",
         )
 
-    players = manager.get_players(game_id)
-    current_player = manager.get_current_player(game_id)
+    players = query.get_players(game_id)
+    current_player = query.get_current_player(game_id)
 
     player_responses = [
         PlayerResponse(
@@ -111,20 +137,26 @@ async def get_game(game_id: str):
 
 
 @router.post("/games/{game_id}/start")
-async def start_game(game_id: str):
+async def start_game(
+    game_id: str,
+    db: AsyncSession = Depends(get_db),
+    query: GameQueryService = Depends(get_query_service),
+    lifecycle: GameLifecycleService = Depends(get_lifecycle_service),
+):
     """
     Start a game (transition from waiting to in_progress).
 
+    Returns 400 if the game is not in the 'waiting' state so that callers
+    receive a clear message rather than a silent no-op.
+
     Args:
-        game_id: Game UUID
+        game_id: Game UUID.
 
     Returns:
-        Success message
+        Success message with new status.
     """
-    manager = get_game_manager()
-    game = manager.get_game(game_id)
-
-    if not game:
+    game = query.get_game(game_id)
+    if game is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Game {game_id} not found",
@@ -136,8 +168,7 @@ async def start_game(game_id: str):
             detail=f"Game is already {game.status}",
         )
 
-    success = manager.start_game(game_id)
-
+    success = await lifecycle.start_game(db, game_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -148,27 +179,29 @@ async def start_game(game_id: str):
 
 
 @router.post("/games/{game_id}/reset")
-async def reset_game(game_id: str):
+async def reset_game(
+    game_id: str,
+    db: AsyncSession = Depends(get_db),
+    query: GameQueryService = Depends(get_query_service),
+    lifecycle: GameLifecycleService = Depends(get_lifecycle_service),
+):
     """
-    Reset a game to initial state.
+    Reset a game to its initial waiting state.
 
     Args:
-        game_id: Game UUID
+        game_id: Game UUID.
 
     Returns:
-        Success message
+        Success message with restored status.
     """
-    manager = get_game_manager()
-    game = manager.get_game(game_id)
-
-    if not game:
+    game = query.get_game(game_id)
+    if game is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Game {game_id} not found",
         )
 
-    success = manager.reset_game(game_id)
-
+    success = await lifecycle.reset_game(db, game_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,39 +212,55 @@ async def reset_game(game_id: str):
 
 
 @router.delete("/games/{game_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_game(game_id: str):
+async def delete_game(
+    game_id: str,
+    db: AsyncSession = Depends(get_db),
+    lifecycle: GameLifecycleService = Depends(get_lifecycle_service),
+):
     """
     Delete a game and all associated data.
 
-    Args:
-        game_id: Game UUID
-    """
-    manager = get_game_manager()
-    success = manager.delete_game(game_id)
+    No pre-flight query needed — lifecycle.delete_game() returns False when the
+    game does not exist, which maps directly to 404.
 
+    Args:
+        game_id: Game UUID.
+    """
+    success = await lifecycle.delete_game(db, game_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Game {game_id} not found",
         )
+    # Return an explicit empty response; FastAPI does not suppress the body
+    # automatically for 204 when the route function returns a value.
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
+# ---------------------------------------------------------------------------
+# Throw management
+# ---------------------------------------------------------------------------
 
 @router.post("/games/{game_id}/throw")
-async def manual_throw(game_id: str, throw_data: ThrowCreate):
+async def manual_throw(
+    game_id: str,
+    throw_data: ThrowCreate,
+    db: AsyncSession = Depends(get_db),
+    query: GameQueryService = Depends(get_query_service),
+    throw_svc: ThrowService = Depends(get_throw_service),
+):
     """
     Record a manual throw (used when camera detection fails).
 
     Args:
-        game_id: Game UUID
-        throw_data: Throw data (segment, multiplier)
+        game_id:    Game UUID.
+        throw_data: Throw data (segment, multiplier).
 
     Returns:
-        Throw result
+        Throw result including remaining score, bust flag, and throws left.
     """
-    manager = get_game_manager()
-    game = manager.get_game(game_id)
-
-    if not game:
+    game = query.get_game(game_id)
+    if game is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Game {game_id} not found",
@@ -223,13 +272,13 @@ async def manual_throw(game_id: str, throw_data: ThrowCreate):
             detail=f"Game is not in progress (status: {game.status})",
         )
 
-    throw_result = manager.process_throw(
-        game_id=game_id,
-        segment=throw_data.segment,
-        multiplier=throw_data.multiplier,
+    throw_result = await throw_svc.process_throw(
+        db,
+        game_id,
+        throw_data.segment,
+        throw_data.multiplier,
     )
-
-    if not throw_result:
+    if throw_result is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid throw or turn already complete",
@@ -253,27 +302,29 @@ async def manual_throw(game_id: str, throw_data: ThrowCreate):
 
 
 @router.post("/games/{game_id}/undo")
-async def undo_throw(game_id: str):
+async def undo_throw(
+    game_id: str,
+    db: AsyncSession = Depends(get_db),
+    query: GameQueryService = Depends(get_query_service),
+    throw_svc: ThrowService = Depends(get_throw_service),
+):
     """
-    Undo the last throw.
+    Undo the last recorded throw for the current player.
 
     Args:
-        game_id: Game UUID
+        game_id: Game UUID.
 
     Returns:
-        Success message
+        Success message.
     """
-    manager = get_game_manager()
-    game = manager.get_game(game_id)
-
-    if not game:
+    game = query.get_game(game_id)
+    if game is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Game {game_id} not found",
         )
 
-    success = manager.undo_throw(game_id)
-
+    success = await throw_svc.undo_throw(db, game_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -282,28 +333,88 @@ async def undo_throw(game_id: str):
 
     return {"message": "Last throw undone", "game_id": game_id}
 
+
+# ---------------------------------------------------------------------------
+# Player management
+# ---------------------------------------------------------------------------
+
 @router.post("/player", response_model=PlayerResponse, status_code=status.HTTP_201_CREATED)
-async def create_player(player_name: str, db: AsyncSession = Depends(get_db)):
+async def create_player(
+    player_name: str,
+    db: AsyncSession = Depends(get_db),
+    player_svc: PlayerService = Depends(get_player_service),
+):
     """
-    Create a new player.
+    Create a new player record (unassigned to any game).
 
     Args:
-        player_name: Name of the player to create
+        player_name: Display name for the player.
 
     Returns:
-        Player creation response with player_id
+        Player response with id and name.
     """
-    service = get_game_service()
-    player = await service.create_player(db, player_name)
-
+    player_record = await player_svc.create_player(db, player_name)
     return PlayerResponse(
-        id=player.id,
-        name=player.name,
-        score=player.score,
+        id=player_record.id,
+        name=player_record.name,
+        score=player_record.score,
         throws_this_turn=0,
         is_current=False,
     )
 
+
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+
+@router.get("/history")
+async def get_game_history(
+    limit: int = Query(10, ge=1, le=100, description="Max number of finished games to return"),
+    db: AsyncSession = Depends(get_db),
+    analytics: AnalyticsService = Depends(get_analytics_service),
+):
+    """
+    Return a summary of the most recently finished games.
+
+    Each entry contains: game_id, mode, double_out, winner_id,
+    created_at, finished_at, total_throws. Ordered newest first.
+    """
+    return await analytics.get_game_history(db, limit=limit)
+
+
+@router.get("/players")
+async def get_all_player_names(
+    db: AsyncSession = Depends(get_db),
+    analytics: AnalyticsService = Depends(get_analytics_service),
+):
+    """Return all distinct player names stored in the database, alphabetically sorted."""
+    names = await analytics.get_all_player_names(db)
+    return {"players": names}
+
+
+@router.get("/players/{player_name}/stats")
+async def get_player_stats(
+    player_name: str,
+    db: AsyncSession = Depends(get_db),
+    analytics: AnalyticsService = Depends(get_analytics_service),
+):
+    """
+    Return lifetime statistics for a player by exact name.
+
+    Stats include: games_played, wins, total_throws, total_score,
+    avg_per_dart, busts. Name matching is case-sensitive.
+    """
+    try:
+        return await analytics.get_player_stats(db, player_name)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Camera endpoints — read hardware state directly; no service involvement
+# ---------------------------------------------------------------------------
 
 @router.get("/cameras")
 async def get_camera_status():
@@ -466,7 +577,7 @@ async def calibrate_cameras():
     Trigger camera calibration (placeholder - will be implemented with camera integration).
 
     Returns:
-        Calibration status
+        Calibration status.
     """
     # TODO: Implement camera calibration
     return {

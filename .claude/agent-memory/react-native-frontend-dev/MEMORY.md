@@ -5,12 +5,14 @@
 - Expo SDK 54, React Native 0.81.5, React 19.1.0
 - TypeScript strict mode, Zustand 5.x state management
 
-## Theme Constants (theme.ts)
-- `COLORS.error` exists: `'#FF4757'` — no need for fallback
-- `COLORS.primary` = `'#1E90FF'`, `COLORS.background` = `'#0A0E27'`, `COLORS.card` = `'#1A1F3A'`
-- `TYPOGRAPHY.small` exists: value `14` — safe to use
-- `TYPOGRAPHY.tiny` = 12, `TYPOGRAPHY.body` = 16, `TYPOGRAPHY.h3` = 20
-- `SPACING`: xs=4, sm=8, md=16, lg=24, xl=32, xxl=48
+## Theme System (light theme, post-redesign)
+- Theme files live in `mobile/src/themes/` — colors.ts, spacing.ts, typography.ts, shadows.ts, index.ts, ThemeContext.tsx
+- `constants/theme.ts` is now a pure backward-compat re-export shim from `../themes`
+- All screens/components use `useTheme()` hook from `../themes/ThemeContext`; no direct `constants/theme` imports remain
+- `createStyles(colors, spacing, typography, shadows)` factory pattern — called inside component, typed with `Theme['colors']` etc.
+- Key colors: `primary=#E8393A` (red CTA), `secondary=#1A1A1A` (charcoal pills), `background=#F5F5F0`, `card=#FFFFFF`, `success=#2D6A4F` (dark green), `warning=#F59E0B` (amber stat highlights), `text=#1A1A1A`, `textSecondary=#6B6B6B`, `border=#E5E5E5`, `textOnPrimary=#FFFFFF`
+- TYPOGRAPHY: tiny=12, small=14, body=16, h3=20, h2=24, h1=32
+- SPACING: xs=4, sm=8, md=16, lg=24, xl=32, xxl=48
 
 ## WebSocket Patterns
 - `wsService.send(type: string, data?: object)` accepts any string type — outgoing messages do not need to be in `WsEventType`

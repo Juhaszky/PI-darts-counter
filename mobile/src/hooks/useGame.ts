@@ -77,6 +77,15 @@ export function useGame() {
     }
   }, [gameState]);
 
+  const fetchAllPlayers = useCallback(async (): Promise<string[]> => {
+    try {
+      return await apiService.getPlayers();
+    } catch (error) {
+      console.error('[useGame] Fetch all players failed:', error);
+      throw error;
+    }
+  }, []);
+
   return {
     gameState,
     createGame,
@@ -84,6 +93,7 @@ export function useGame() {
     submitManualScore,
     undoLastThrow,
     getCurrentPlayer,
-    fetchPlayers
+    fetchPlayers,
+    fetchAllPlayers,
   };
 }

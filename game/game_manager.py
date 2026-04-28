@@ -194,7 +194,7 @@ class GameManager:
 
         return throw_result
 
-    def undo_throw(self, game_id: str) -> bool:
+    def undo_throw(self, game_id: str) -> Optional[ThrowResult]:
         """
         Undo the last throw.
 
@@ -202,15 +202,15 @@ class GameManager:
             game_id: Game ID
 
         Returns:
-            True if undo successful, False otherwise
+            The undone ThrowResult if successful, None otherwise
         """
         game = self.get_game(game_id)
         if not game or game.status != "in_progress":
-            return False
+            return None
 
         throws = self.throws_history.get(game_id, [])
         if not throws:
-            return False
+            return None
 
         # Remove last throw
         last_throw = throws.pop()
@@ -224,7 +224,7 @@ class GameManager:
                 player.throws_this_turn = max(0, player.throws_this_turn - 1)
                 break
 
-        return True
+        return last_throw
 
     def _end_turn_with_bust(self, game_id: str, player: Player) -> None:
         """

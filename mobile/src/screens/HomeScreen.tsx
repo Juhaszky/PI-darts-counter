@@ -7,10 +7,15 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../constants/theme';
+import { useTheme } from '../themes/ThemeContext';
+import type { Theme } from '../themes';
 import { useConnectionStore } from '../store/connectionStore';
 import { apiService } from '../services/apiService';
 import { wsService, ConnectionStatus } from '../services/websocketService';
@@ -25,6 +30,7 @@ export default function HomeScreen() {
     useConnectionStore();
   const [isLoading, setIsLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(ConnectionStatus.DISCONNECTED);
+  const { colors, spacing, typography, shadows } = useTheme();
 
   useEffect(() => {
     loadStoredConnection();
@@ -38,136 +44,226 @@ export default function HomeScreen() {
 
   const handleConnect = async () => {
     if (!host.trim() || !port.trim()) {
-      Alert.alert('Hiba', 'Kérlek add meg az IP címet és a portot!');
+      Alert.alert('Missing details', 'Please enter the IP address and port.');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      // Initialize API service
       apiService.initialize(host, port);
-
-      // Test connection
       await apiService.getHealth();
-
-      // Save connection
       await saveConnection();
-
-      // Navigate to setup
       navigation.navigate('Setup', { gameId: '' });
     } catch (error) {
       console.error('Connection failed:', error);
-      Alert.alert('Kapcsolódási hiba', 'Nem sikerült csatlakozni a szerverhez. Ellenőrizd az IP címet és a portot!');
+      Alert.alert(
+        'Connection failed',
+        'Could not reach the server. Check the IP address and port.',
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
+  const styles = createStyles(colors, spacing, typography, shadows);
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>🎯 Darts Counter</Text>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Raspberry Pi IP címe</Text>
-        <TextInput
-          style={styles.input}
-          value={host}
-          onChangeText={setHost}
-          placeholder="192.168.1.5"
-          placeholderTextColor={COLORS.textSecondary}
-          keyboardType="numeric"
-          autoCapitalize="none"
-        />
-
-        <Text style={styles.label}>Port</Text>
-        <TextInput
-          style={styles.input}
-          value={port}
-          onChangeText={setPort}
-          placeholder="8000"
-          placeholderTextColor={COLORS.textSecondary}
-          keyboardType="numeric"
-        />
-
-        <TouchableOpacity
-          style={[styles.button, isLoading && styles.buttonDisabled]}
-          onPress={handleConnect}
-          disabled={isLoading}
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
         >
-          {isLoading ? (
-            <ActivityIndicator color={COLORS.text} />
-          ) : (
-            <Text style={styles.buttonText}>Csatlakozás</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+          {/* Hero card */}
+          <View style={styles.heroCard}>
+            <View style={styles.heroTopRow}>
+              <View style={styles.heroDotBadge} />
+              <Text style={styles.heroBadgeText}>PI Darts Counter</Text>
+            </View>
+            <Text style={styles.heroHeadline}>Throw{'\n'}some darts.</Text>
+            <TouchableOpacity
+              style={[styles.heroButton, isLoading && styles.heroButtonDisabled]}
+              onPress={handleConnect}
+              disabled={isLoading}
+              activeOpacity={0.85}
+            >
+              {isLoading ? (
+                <ActivityIndicator color={colors.primary} size="small" />
+              ) : (
+                <>
+                  <View style={styles.heroButtonDot} />
+                  <Text style={styles.heroButtonText}>Start game</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
 
-      <ConnectionStatusIndicator status={connectionStatus} />
+          {/* Connection config card */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Raspberry Pi Connection</Text>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>v1.0 • React Native + FastAPI</Text>
-      </View>
-    </View>
+            <Text style={styles.label}>IP Address</Text>
+            <TextInput
+              style={styles.input}
+              value={host}
+              onChangeText={setHost}
+              placeholder="192.168.1.5"
+              placeholderTextColor={colors.placeholder}
+              keyboardType="numeric"
+              autoCapitalize="none"
+            />
+
+            <Text style={styles.label}>Port</Text>
+            <TextInput
+              style={styles.input}
+              value={port}
+              onChangeText={setPort}
+              placeholder="8000"
+              placeholderTextColor={colors.placeholder}
+              keyboardType="numeric"
+            />
+
+            <View style={styles.statusRow}>
+              <ConnectionStatusIndicator status={connectionStatus} />
+            </View>
+          </View>
+
+          <Text style={styles.footer}>v1.0 • React Native + FastAPI</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    padding: SPACING.lg,
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: TYPOGRAPHY.h1,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    textAlign: 'center',
-    marginBottom: SPACING.xxl,
-  },
-  card: {
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
-    padding: SPACING.lg,
-    ...SHADOWS.medium,
-  },
-  label: {
-    fontSize: TYPOGRAPHY.body,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-    marginTop: SPACING.md,
-  },
-  input: {
-    backgroundColor: COLORS.background,
-    borderRadius: 8,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    fontSize: TYPOGRAPHY.body,
-    color: COLORS.text,
-  },
-  button: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 8,
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: COLORS.text,
-    fontSize: TYPOGRAPHY.body,
-    fontWeight: 'bold',
-  },
-  footer: {
-    position: 'absolute',
-    bottom: SPACING.lg,
-    alignSelf: 'center',
-  },
-  footerText: {
-    fontSize: TYPOGRAPHY.small,
-    color: COLORS.textSecondary,
-  },
-});
+function createStyles(
+  colors: Theme['colors'],
+  spacing: Theme['spacing'],
+  typography: Theme['typography'],
+  shadows: Theme['shadows'],
+) {
+  return StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    keyboardView: {
+      flex: 1,
+    },
+    scroll: {
+      flex: 1,
+    },
+    scrollContent: {
+      padding: spacing.lg,
+      paddingBottom: spacing.xxl,
+    },
+    // Hero card
+    heroCard: {
+      backgroundColor: colors.primary,
+      borderRadius: 16,
+      padding: spacing.xl,
+      marginBottom: spacing.lg,
+      ...shadows.large,
+    },
+    heroTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.lg,
+    },
+    heroDotBadge: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.textOnPrimary,
+      marginRight: spacing.sm,
+      opacity: 0.9,
+    },
+    heroBadgeText: {
+      fontSize: typography.small,
+      color: colors.textOnPrimary,
+      opacity: 0.9,
+      fontWeight: '600',
+      letterSpacing: 0.5,
+    },
+    heroHeadline: {
+      fontSize: 40,
+      fontWeight: '800',
+      color: colors.textOnPrimary,
+      lineHeight: 46,
+      marginBottom: spacing.xl,
+    },
+    heroButton: {
+      backgroundColor: colors.textOnPrimary,
+      borderRadius: 12,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+    },
+    heroButtonDisabled: {
+      opacity: 0.7,
+    },
+    heroButtonDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.primary,
+      marginRight: spacing.sm,
+    },
+    heroButtonText: {
+      fontSize: typography.body,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    // Config card
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      padding: spacing.lg,
+      marginBottom: spacing.lg,
+      ...shadows.medium,
+    },
+    cardTitle: {
+      fontSize: typography.h3,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: spacing.lg,
+    },
+    label: {
+      fontSize: typography.small,
+      color: colors.textSecondary,
+      fontWeight: '600',
+      marginBottom: spacing.xs,
+      marginTop: spacing.md,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    input: {
+      backgroundColor: colors.inputBackground,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+      fontSize: typography.body,
+      color: colors.text,
+    },
+    statusRow: {
+      marginTop: spacing.md,
+      paddingTop: spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    footer: {
+      fontSize: typography.tiny,
+      color: colors.placeholder,
+      textAlign: 'center',
+      marginTop: spacing.sm,
+    },
+  });
+}
